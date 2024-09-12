@@ -1,0 +1,270 @@
+# Código Python utilizado:
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import re
+
+# Configurando o estilo dos gráficos
+sns.set(style="whitegrid")
+
+# Diretório onde o arquivo está localizado
+diretorio_entrada = '/content/drive/MyDrive/DataLake/Entrada/'
+
+# Verificando se existem arquivos no diretório que seguem o padrão esperado
+arquivos = [f for f in os.listdir(diretorio_entrada) if f.startswith('Dataset') and f.endswith('.xlsx')]
+
+if len(arquivos) == 0:
+    raise FileNotFoundError("Nenhum arquivo encontrado no diretório especificado com o padrão 'Dataset_xxxxxx.xlsx'")
+
+# Obtendo o primeiro arquivo que corresponde ao padrão
+arquivo = arquivos[0]
+
+# Extraindo o mês e o ano do nome do arquivo com regex
+match = re.search(r'Dataset_(\d{6}).xlsx', arquivo)
+if match:
+    mes_ano = match.group(1)
+    mes_atual = mes_ano[:2]  # Captura os dois primeiros dígitos como o mês
+    ano_atual = mes_ano[2:]  # Captura os quatro últimos dígitos como o ano
+else:
+    raise ValueError("O nome do arquivo não segue o padrão esperado 'Dataset_xxxxxx.xlsx'")
+
+# Criando o caminho completo do arquivo
+file_path = os.path.join(diretorio_entrada, arquivo)
+
+# Carregando o dataset
+df = pd.read_excel(file_path)
+
+# Exibindo as primeiras linhas para entender a estrutura dos dados
+print(f"Primeiras linhas do dataset ({mes_atual}/{ano_atual}):")
+print(df.head())
+
+# Criando os diretórios para salvar as tabelas e visualizações, se não existirem
+banco_dados_dir = os.path.join(diretorio_entrada, 'DatalakeHouse', 'Banco de Dados')
+visualizacoes_dir = os.path.join(diretorio_entrada, 'DatalakeHouse', 'Visualizações')
+os.makedirs(banco_dados_dir, exist_ok=True)
+os.makedirs(visualizacoes_dir, exist_ok=True)
+
+# Função para atualizar a dimensão
+def atualiza_dimensao(nova_dimensao, arquivo_dimensao, chave):
+    # Carregando a dimensão existente, se existir
+    caminho_arquivo = os.path.join(banco_dados_dir, arquivo_dimensao)
+    if os.path.exists(caminho_arquivo):
+        dimensao_existente = pd.read_csv(caminho_arquivo)
+    else:
+        dimensao_existente = pd.DataFrame(columns=nova_dimensao.columns)
+
+    # Concatenando e removendo duplicatas
+    dimensao_atualizada = pd.concat([dimensao_existente, nova_dimensao]).drop_duplicates(subset=chave).reset_index(drop=True)
+
+    # Garantindo que o ID seja consistente
+    if not dimensao_existente.empty:
+        last_id = dimensao_existente[chave + '_id'].max()
+        dimensao_atualizada[chave + '_id'] = range(last_id + 1, last_id + 1 + len(dimensao_atualizada))
+    else:
+        dimensao_atualizada[chave + '_id'] = range(1, len(dimensao_atualizada) + 1)
+
+    # Salvando a dimensão atualizada
+    dimensao_atualizada.to_csv(caminho_arquivo, index=False)
+
+    return dimensao_atualizada
+
+# Função para atualizar a tabela fato
+def atualiza_fato(nova_fato, arquivo_fato):
+    # Carregando a tabela fato existente, se existir
+    caminho_arquivo = os.path.join(banco_dados_dir, arquivo_fato)
+    if os.path.exists(caminho_arquivo):
+        fato_existente = pd.read_csv(caminho_arquivo)
+    else:
+        fato_existente = pd.DataFrame(columns=nova_fato.columns)
+
+    # Convertendo a coluna 'Data' para datetime com mais flexibilidade
+    nova_fato['Data'] = pd.to_datetime(nova_fato['Data'], errors='coerce')
+    fato_existente['Data'] = pd.to_datetime(fato_existente['Data'], errors='coerce')
+
+    # Lidando com valores inválidos
+    nova_fato = nova_fato.dropna(subset=['Data'])
+
+    # Extraindo o mês e ano da nova fato e do fato existente
+    nova_fato['Mes_Ano'] = nova_fato['Data'].dt.to_period('M')
+    fato_existente['Mes_Ano'] = fato_existente['Data'].dt.to_period('M')
+
+    # Verificando se o mês e ano já existem no fato existente
+    mes_ano_existente = fato_existente['Mes_Ano'].unique()
+
+    # Atualizando ou inserindo dados
+    if mes_ano in mes_ano_existente:
+        # Se o mês e ano já existem, substitua os registros
+        fato_existente = fato_existente[~(fato_existente['Mes_Ano'] == mes_ano)]
+        fato_atualizada = pd.concat([fato_existente, nova_fato]).reset_index(drop=True)
+    else:
+        # Se o mês e ano não existem, insira os novos registros
+        fato_atualizada = pd.concat([fato_existente, nova_fato]).reset_index(drop=True)
+
+    # Removendo a coluna temporária 'Mes_Ano'
+    fato_atualizada = fato_atualizada.drop(columns=['Mes_Ano'])
+
+    # Salvando a tabela fato atualizada
+    fato_atualizada.to_csv(caminho_arquivo, index=False)
+
+    return fato_atualizada
+
+# 2. Atualização das Tabelas de Dimensão
+
+# Dimensão Produto
+nova_dim_produto = df[['Produto']].drop_duplicates().reset_index(drop=True)
+dim_produto = atualiza_dimensao(nova_dim_produto, 'dim_produto.csv', 'Produto')
+print("Dimensão Produto atualizada e salva em CSV:")
+print(dim_produto.head())
+
+# Dimensão Cliente
+nova_dim_cliente = df[['Cliente']].drop_duplicates().reset_index(drop=True)
+dim_cliente = atualiza_dimensao(nova_dim_cliente, 'dim_cliente.csv', 'Cliente')
+print("Dimensão Cliente atualizada e salva em CSV:")
+print(dim_cliente.head())
+
+# Dimensão Retenção
+nova_dim_retencao = df[['Retenção']].drop_duplicates().reset_index(drop=True)
+dim_retencao = atualiza_dimensao(nova_dim_retencao, 'dim_retencao.csv', 'Retenção')
+print("Dimensão Retenção atualizada e salva em CSV:")
+print(dim_retencao.head())
+
+# 3. Atualização da Tabela Fato
+
+# Unindo as dimensões com o dataset original
+fato_vendas = df.merge(dim_produto[['Produto', 'Produto_id']], on='Produto', how='left')
+fato_vendas = fato_vendas.merge(dim_cliente[['Cliente', 'Cliente_id']], on='Cliente', how='left')
+fato_vendas = fato_vendas.merge(dim_retencao[['Retenção', 'Retenção_id']], on='Retenção', how='left')
+
+# Selecionando apenas as colunas necessárias para a tabela fato
+fato_vendas = fato_vendas[['Produto_id', 'Cliente_id', 'Retenção_id', 'Qtd', 'Custo', 'Venda', 'Lucro', 'Mês', 'Data']]
+fato_vendas = atualiza_fato(fato_vendas, 'fato_vendas.csv')
+print("Tabela Fato atualizada e salva em CSV:")
+print(fato_vendas.head())
+
+# 4. Criação das Visualizações
+
+# Carregar as dimensões e a tabela fato atualizadas
+dim_produto = pd.read_csv(os.path.join(banco_dados_dir, 'dim_produto.csv'))
+dim_cliente = pd.read_csv(os.path.join(banco_dados_dir, 'dim_cliente.csv'))
+dim_retencao = pd.read_csv(os.path.join(banco_dados_dir, 'dim_retencao.csv'))
+fato_vendas = pd.read_csv(os.path.join(banco_dados_dir, 'fato_vendas.csv'))
+
+# Visualização 1: Distribuição de Vendas por Produto
+vendas_produtos = fato_vendas.merge(dim_produto, on='Produto_id')
+
+# Ordenando os produtos pela quantidade de vendas
+vendas_produtos_ordered = vendas_produtos['Produto'].value_counts().index
+
+plt.figure(figsize=(14, 7))  # Tamanho da figura ajustado
+sns.countplot(data=vendas_produtos, x='Produto', order=vendas_produtos_ordered, palette='Blues_r')
+plt.title('Distribuição de Vendas por Produto', fontsize=16)
+plt.xlabel('Produto', fontsize=14)
+plt.ylabel('Número de Vendas', fontsize=14)
+plt.xticks(rotation=45, ha="right", fontsize=12)
+plt.yticks(fontsize=12)
+
+# Adicionando os valores sobre as barras
+for p in plt.gca().patches:
+    plt.gca().annotate(f'{p.get_height()}',
+                       (p.get_x() + p.get_width() / 2., p.get_height()),
+                        va='baseline', fontsize=12, color='black', xytext=(0, 5),
+                       textcoords='offset points')
+
+plt.tight_layout()  # Ajustando o layout para evitar cortes
+plt.savefig(os.path.join(visualizacoes_dir, 'distribuicao_vendas_produto.png'))
+plt.show()
+
+# Visualização 2: Receita Gerada por Produto
+vendas_produtos['receita'] = vendas_produtos['Venda'] * vendas_produtos['Qtd']
+receita_por_produto = vendas_produtos.groupby('Produto')['receita'].sum().reset_index()
+
+# Ordenando os produtos pela receita
+receita_por_produto = receita_por_produto.sort_values(by='receita', ascending=False)
+
+plt.figure(figsize=(14, 7))  # Tamanho da figura ajustado
+sns.barplot(data=receita_por_produto, x='Produto', y='receita', palette='Greens_r')
+plt.title('Receita por Produto', fontsize=16)
+plt.xlabel('Produto', fontsize=14)
+plt.ylabel('Receita Total', fontsize=14)
+plt.xticks(rotation=45, ha="right", fontsize=12)
+plt.yticks(fontsize=12)
+
+# Adicionando os valores sobre as barras
+for p in plt.gca().patches:
+    plt.gca().annotate(f'R${p.get_height():.2f}',
+                       (p.get_x() + p.get_width() / 2., p.get_height()),
+                       ha='center', va='baseline', fontsize=12, color='black', xytext=(0, 5),
+                       textcoords='offset points')
+
+plt.tight_layout()  # Ajustando o layout para evitar cortes
+plt.savefig(os.path.join(visualizacoes_dir, 'receita_por_produto.png'))
+plt.show()
+
+# Visualização 3: Distribuição de Clientes por Retenção
+vendas_retencao = fato_vendas.merge(dim_retencao, on='Retenção_id')
+
+plt.figure(figsize=(14, 7))  # Tamanho da figura ajustado
+sns.countplot(data=vendas_retencao, x='Retenção', order=vendas_retencao['Retenção'].value_counts().index, palette='Oranges_r')
+plt.title('Distribuição de Clientes por Retenção', fontsize=16)
+plt.xlabel('Retenção', fontsize=14)
+plt.ylabel('Número de Clientes', fontsize=14)
+plt.xticks(rotation=45, ha="right", fontsize=12)
+plt.yticks(fontsize=12)
+
+# Adicionando os valores sobre as barras
+for p in plt.gca().patches:
+    plt.gca().annotate(f'{p.get_height()}',
+                       (p.get_x() + p.get_width() / 2., p.get_height()),
+                       ha='center', va='baseline', fontsize=12, color='black', xytext=(0, 5),
+                       textcoords='offset points')
+
+plt.tight_layout()  # Ajustando o layout para evitar cortes
+plt.savefig(os.path.join(visualizacoes_dir, 'distribuicao_clientes_retencao.png'))
+plt.show()
+
+# Visualização 4: Total de Vendas por Mês
+
+# Convertendo a coluna 'Data' para datetime, caso ainda não esteja
+fato_vendas['Data'] = pd.to_datetime(fato_vendas['Data'], errors='coerce')
+
+# Criando uma nova coluna para armazenar o mês e o ano
+fato_vendas['Mes_Ano'] = fato_vendas['Data'].dt.to_period('M')
+
+# Calculando o total de vendas por mês
+vendas_por_mes = fato_vendas.groupby('Mes_Ano')['Venda'].sum().reset_index()
+
+# Convertendo 'Mes_Ano' de Period para datetime para facilitar a plotagem
+vendas_por_mes['Mes_Ano'] = vendas_por_mes['Mes_Ano'].dt.to_timestamp()
+
+# Plotando o gráfico de linha
+plt.figure(figsize=(14, 7))  # Tamanho da figura ajustado
+sns.lineplot(data=vendas_por_mes, x='Mes_Ano', y='Venda', marker='o', color='blue')
+plt.title('Total de Vendas por Mês', fontsize=16)
+plt.xlabel('Mês', fontsize=14)
+plt.ylabel('Total de Vendas', fontsize=14)
+plt.xticks(rotation=45, ha="right", fontsize=12)
+plt.yticks(fontsize=12)
+
+# Adicionando os valores sobre os pontos
+for x, y in zip(vendas_por_mes['Mes_Ano'], vendas_por_mes['Venda']):
+    plt.text(x, y, f'R${y:.2f}', ha='center', va='bottom', fontsize=12)
+
+plt.tight_layout()  # Ajustando o layout para evitar cortes
+plt.savefig(os.path.join(visualizacoes_dir, 'total_vendas_por_mes.png'))
+plt.show()
+
+# 5. Mover o arquivo processado para a pasta 'Processados'
+
+# Caminho para o diretório de processados
+diretorio_processados = os.path.join(diretorio_entrada, 'Processados')
+
+# Verifica se a pasta 'Processados' existe, se não, cria
+os.makedirs(diretorio_processados, exist_ok=True)
+
+# Movendo o arquivo para a pasta 'Processados'
+novo_caminho_arquivo = os.path.join(diretorio_processados, arquivo)
+os.rename(file_path, novo_caminho_arquivo)
+
+print(f"Arquivo movido para {novo_caminho_arquivo}")
