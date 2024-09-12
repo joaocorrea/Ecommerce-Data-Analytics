@@ -1,6 +1,7 @@
 # Ecommerce-Data-Analytics
 
 Documentação do Código: Análise e Visualização de Dados de Vendas
+
 -1. Visão Geral
 Este código foi desenvolvido para realizar a análise e visualização de dados de vendas de uma loja de e-commerce. O código processa um arquivo de vendas em formato Excel, realiza a normalização dos dados, atualiza tabelas de dimensões e de fato, gera visualizações de dados e organiza os arquivos em um DataLake estruturado. O objetivo final é fornecer ao microempreendedor uma visão clara dos dados de vendas para otimizar suas estratégias de marketing e gestão de estoque.
 
